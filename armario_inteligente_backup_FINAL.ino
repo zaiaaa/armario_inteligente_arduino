@@ -74,110 +74,59 @@ void loop() {
 
   if(WiFi.status() == WL_CONNECTED){
     if(estadoBotao == false){
-          digitalWrite(yellow, LOW);
-          if (!mensagem_mostrada) {
-            lcd.setCursor(0, 0);
-            lcd.print("Modo LEITURA");
-            lcd.setCursor(0, 1);
-            lcd.print("Aproxime cracha:");
-            mensagem_mostrada = true;
-          }
-        
-        String uid = "";
-        if (!mfrc522.PICC_IsNewCardPresent()) return;
-        if (!mfrc522.PICC_ReadCardSerial()) return;
-
-        Serial.println(F("**Cartão Detectado:**"));
-        
-          Serial.print(F("Card UID: "));
-          for (byte i = 0; i < mfrc522.uid.size; i++) {
-            Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
-            Serial.print(mfrc522.uid.uidByte[i], HEX);
-            uid += String(mfrc522.uid.uidByte[i], HEX);
-          }
-          uid.toUpperCase();
-
-          if (uid == emergencyUID) {
-            // Tag de emergência detectada!
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("EMERGENCIA!");
-            digitalWrite(green, HIGH);
-            digitalWrite(rele, HIGH);
-            delay(5000);  // abre por 5 segundos (ajuste se quiser)
-            while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
-            digitalWrite(green, LOW);
-            digitalWrite(rele, LOW);
-            mensagem_mostrada = false;
-            mfrc522.PICC_HaltA();
-            mfrc522.PCD_StopCrypto1();
-            delay(1000);
-            return;  // sai do loop para não executar o resto do código
-          }
-
-
-          HTTPClient http;
-          http.begin(urlAbertura);
-          http.addHeader("Content-Type", "application/json"); // Tipo de dado que vai enviar
-          String body = "{\"UID\": \"" + uid + "\"}";
-
-          Serial.println(body);
-
-          int response = http.POST(body);
-
-          if(response == 201 && estadoBotao == false){
-            lcd.clear();
-            digitalWrite(green, HIGH);
-            digitalWrite(rele, HIGH);
-            lcd.setCursor(0, 0);
-            lcd.print("Aberto!");
-            lcd.setCursor(0, 1);
-            lcd.print("Cartao OK");
-            Serial.println("resposta http" + http.getString());
-            delay(5000);
-            while(digitalRead(limit_switch) == 1);
-            delay(1500);
-          }else if(response == 403 && estadoBotao == false){
-            lcd.clear();
-            digitalWrite(green, LOW);
-            Serial.println("UID não encontrado!");
-            lcd.setCursor(0, 0);
-            lcd.print("Cartao nao");
-            lcd.setCursor(0, 1);
-            lcd.print("encontrado!");
-            for(int i = 0; i <= 5; i++){
-              digitalWrite(red, HIGH);
-              delay(500);
-              digitalWrite(red, LOW);
-              delay(500);
-            }
-            delay(2000);
-          }
-          else{
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("Unknown error");
-            lcd.setCursor(0, 1);
-            lcd.print("Visualize serial.");
-            String resp = http.getString();
-            digitalWrite(green, LOW);
-            digitalWrite(red, HIGH);
-            Serial.println("FALHA!");
-            Serial.println(response);
-            Serial.println(resp);
-            delay(2000);
-          }
-        
-        mensagem_mostrada = false;
-        Serial.println(F("\n**Leitura finalizada**\n"));
-
-      http.end();
-      mfrc522.PICC_HaltA();
-      mfrc522.PCD_StopCrypto1();
-      delay(1000);
-
+      modoLeitura();
     }else{
-      digitalWrite(yellow, HIGH);
+      modoCadastro();
+    }
+  }else{
+    offline();
+  }
+
+}
+
+void offline(){
+      lcd.clear();
+    String uid = "";
+    if (!mfrc522.PICC_IsNewCardPresent()) return;
+    if (!mfrc522.PICC_ReadCardSerial()) return;
+
+    Serial.println(F("**Cartão Detectado:**"));
+    
+      Serial.print(F("Card UID: "));
+      for (byte i = 0; i < mfrc522.uid.size; i++) {
+        Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+        Serial.print(mfrc522.uid.uidByte[i], HEX);
+        uid += String(mfrc522.uid.uidByte[i], HEX);
+      }
+      uid.toUpperCase();
+
+      if (uid == emergencyUID) {
+        // Tag de emergência detectada!
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("EMERGENCIA!");
+        digitalWrite(green, HIGH);
+        digitalWrite(rele, HIGH);
+        delay(5000);  // abre por 5 segundos (ajuste se quiser)
+        while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
+        digitalWrite(green, LOW);
+        digitalWrite(rele, LOW);
+        mensagem_mostrada = false;
+        mfrc522.PICC_HaltA();
+        mfrc522.PCD_StopCrypto1();
+        // Aguarda o cartão ser removido do campo
+        while (mfrc522.PICC_IsNewCardPresent() || mfrc522.PICC_ReadCardSerial()) {
+          delay(100);
+        }
+
+        delay(1000);
+        return;  // sai do loop para não executar o resto do código
+      }
+}
+
+
+void modoCadastro(){
+        digitalWrite(yellow, HIGH);
       MFRC522::MIFARE_Key key;
       for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
           
@@ -299,15 +248,20 @@ void loop() {
       mensagem_mostrada = false;
 
       http.end();
-      mfrc522.PICC_HaltA();
-      mfrc522.PCD_StopCrypto1();
-    }
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
-    delay(1000);
-  }else{
-    lcd.clear();
-    tentaReconectarWiFi();
+}
+
+
+void modoLeitura(){
+  Serial.println("Entrou no modo leitura.");
+          digitalWrite(yellow, LOW);
+          if (!mensagem_mostrada) {
+            lcd.setCursor(0, 0);
+            lcd.print("Modo LEITURA");
+            lcd.setCursor(0, 1);
+            lcd.print("Aproxime cracha:");
+            mensagem_mostrada = true;
+          }
+      Serial.println("Aguardando UID");      
         String uid = "";
         if (!mfrc522.PICC_IsNewCardPresent()) return;
         if (!mfrc522.PICC_ReadCardSerial()) return;
@@ -321,7 +275,7 @@ void loop() {
             uid += String(mfrc522.uid.uidByte[i], HEX);
           }
           uid.toUpperCase();
-
+          Serial.println("UID lido");
           if (uid == emergencyUID) {
             // Tag de emergência detectada!
             lcd.clear();
@@ -329,19 +283,82 @@ void loop() {
             lcd.print("EMERGENCIA!");
             digitalWrite(green, HIGH);
             digitalWrite(rele, HIGH);
-            delay(5000);  // abre por 5 segundos (ajuste se quiser)
+            delay(2000);  // abre por 5 segundos (ajuste se quiser)
             while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
             digitalWrite(green, LOW);
             digitalWrite(rele, LOW);
             mensagem_mostrada = false;
-            mfrc522.PICC_HaltA();
-            mfrc522.PCD_StopCrypto1();
+            Serial.println("Lido o cartao de emergencia");
             delay(1000);
+            lcd.clear();
             return;  // sai do loop para não executar o resto do código
           }
-  }
 
+
+          HTTPClient http;
+          http.begin(urlAbertura);
+          http.addHeader("Content-Type", "application/json"); // Tipo de dado que vai enviar
+          String body = "{\"UID\": \"" + uid + "\"}";
+
+          Serial.println(body);
+
+          int response = http.POST(body);
+
+          if(response == 201 && estadoBotao == false){
+            lcd.clear();
+            digitalWrite(green, HIGH);
+            digitalWrite(rele, HIGH);
+            lcd.setCursor(0, 0);
+            lcd.print("Aberto!");
+            lcd.setCursor(0, 1);
+            lcd.print("Cartao OK");
+            Serial.println("resposta http" + http.getString());
+            delay(1000);
+            while(digitalRead(limit_switch) == 1);
+            delay(1500);
+            Serial.println("leitura ok");
+          }else if(response == 403 && estadoBotao == false){
+            lcd.clear();
+            digitalWrite(green, LOW);
+            Serial.println("UID não encontrado!");
+            lcd.setCursor(0, 0);
+            lcd.print("Cartao nao");
+            lcd.setCursor(0, 1);
+            lcd.print("encontrado!");
+            for(int i = 0; i <= 5; i++){
+              digitalWrite(red, HIGH);
+              delay(500);
+              digitalWrite(red, LOW);
+              delay(500);
+            }
+            Serial.println("leitura ok.");
+            delay(2000);
+          }
+          else{
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Unknown error");
+            lcd.setCursor(0, 1);
+            lcd.print("Visualize serial.");
+            String resp = http.getString();
+            digitalWrite(green, LOW);
+            digitalWrite(red, HIGH);
+            Serial.println("FALHA!");
+            Serial.println(response);
+            Serial.println(resp);
+            Serial.println("leitura ok.");
+            delay(2000);
+          }
+        Serial.println("SAIU do modo leitura.");
+        mensagem_mostrada = false;
+        Serial.println(F("\n**Leitura finalizada**\n"));
+
+      http.end();
+      mfrc522.PICC_HaltA();
+      mfrc522.PCD_StopCrypto1();
+      delay(1500);
 }
+
 
 void trocaEstado(){
 
@@ -353,20 +370,4 @@ void trocaEstado(){
     delay(150);
   }
 
-}
-
-unsigned long previousMillis = 0;
-const long interval = 10000;
-
-void tentaReconectarWiFi() {
-  unsigned long currentMillis = millis();
-  if (WiFi.status() != WL_CONNECTED && (currentMillis - previousMillis >= interval)) {
-    previousMillis = currentMillis;
-    lcd.setCursor(0, 0);
-    lcd.print("Tentando");
-    lcd.setCursor(0, 1);
-    lcd.print("reconectar WIFI");
-    WiFi.disconnect();
-    WiFi.begin(ssid, password);
-  }
 }
