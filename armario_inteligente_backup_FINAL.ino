@@ -2,7 +2,8 @@
 #include <MFRC522.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
 
 String urlAbertura = "https://api-armario-inteligente.onrender.com/abertura/";
 String urlCadastro = "https://api-armario-inteligente.onrender.com/usuarios/";
@@ -31,9 +32,12 @@ bool estadoBotao = false;
 
 const int rele = 27;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
-LiquidCrystal lcd(15, 13, 4, 16, 17, 33);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+//LiquidCrystal lcd(15, 13, 4, 16, 17, 33);
 
 void setup() {
+  Wire.begin(32, 33);
   Serial.begin(115200);
   pinMode(green, OUTPUT);
   pinMode(red, OUTPUT);
@@ -42,7 +46,10 @@ void setup() {
   pinMode(botao, INPUT);
   pinMode(yellow, OUTPUT);
 
-  lcd.begin(16, 2);
+  //lcd.begin(16, 2);
+  lcd.init();
+  lcd.backlight();
+  
   SPI.begin(18, 19, 23, SS_PIN);
   mfrc522.PCD_Init();
   WiFi.begin(ssid, password);
@@ -141,6 +148,10 @@ void modoCadastro(){
       if (!mfrc522.PICC_IsNewCardPresent()) return;
       if (!mfrc522.PICC_ReadCardSerial()) return;
 
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Lendo cartao...");
+
       String uidMaster = "";
       Serial.print(F("Card UID: "));
       for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -187,6 +198,11 @@ void modoCadastro(){
 
       // 2. Espera NOVA TAG
       while (!mfrc522.PICC_IsNewCardPresent()) yield();
+
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Lendo cartao...");
+
       while (!mfrc522.PICC_ReadCardSerial()) yield();
 
       String uid_novo = "";
@@ -252,7 +268,6 @@ void modoCadastro(){
 
 
 void modoLeitura(){
-  Serial.println("Entrou no modo leitura.");
           digitalWrite(yellow, LOW);
           if (!mensagem_mostrada) {
             lcd.setCursor(0, 0);
@@ -266,6 +281,9 @@ void modoLeitura(){
         if (!mfrc522.PICC_IsNewCardPresent()) return;
         if (!mfrc522.PICC_ReadCardSerial()) return;
 
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Lendo cartao...");
         Serial.println(F("**Cartão Detectado:**"));
         
           Serial.print(F("Card UID: "));
@@ -325,14 +343,14 @@ void modoLeitura(){
             lcd.print("Cartao nao");
             lcd.setCursor(0, 1);
             lcd.print("encontrado!");
-            for(int i = 0; i <= 5; i++){
+            for(int i = 0; i <= 2; i++){
               digitalWrite(red, HIGH);
               delay(500);
               digitalWrite(red, LOW);
               delay(500);
             }
             Serial.println("leitura ok.");
-            delay(2000);
+            delay(1500);
           }
           else{
             lcd.clear();
