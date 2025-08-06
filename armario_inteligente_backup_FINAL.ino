@@ -4,11 +4,12 @@
 #include <HTTPClient.h>
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
+#include <ArduinoJson.h>
 
 String urlAbertura = "https://api-armario-inteligente.onrender.com/abertura/";
 String urlCadastro = "https://api-armario-inteligente.onrender.com/usuarios/";
 String urlMaster = "https://api-armario-inteligente.onrender.com/master/";
-
+String urlStatus = "https://api-armario-inteligente.onrender.com/status_abertura/status";
 
 
 char* ssid = "Travazap_2G";
@@ -28,6 +29,8 @@ bool mensagem_mostrada = false;
 #define yellow          14
 
 
+enum Modo { RETIRADA, CADASTRO, DEVOLUCAO };
+Modo modoAtual = RETIRADA;
 bool estadoBotao = false;
 
 const int rele = 27;
@@ -80,11 +83,18 @@ void loop() {
   trocaEstado();
 
   if(WiFi.status() == WL_CONNECTED){
-    if(estadoBotao == false){
-      modoLeitura();
-    }else{
-      modoCadastro();
+    switch (modoAtual) {
+      case RETIRADA:
+        validaUsuario();
+        break;
+      case CADASTRO:
+        modoCadastro();
+        break;
+      case DEVOLUCAO:
+        validaUsuario();
+        break;
     }
+
   }else{
     offline();
   }
@@ -221,7 +231,7 @@ void modoCadastro(){
       body = "{\"UID\": \"" + uid_novo + "\"}";
       response = http.POST(body);
 
-      if(response == 201 && estadoBotao){
+      if(response == 201){
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("tag registrada");
@@ -230,7 +240,7 @@ void modoCadastro(){
         Serial.println("resposta http" + http.getString());
         digitalWrite(green, HIGH);
         delay(2000);
-      }else if(response == 403 && estadoBotao){
+      }else if(response == 403){
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("UID obrigatorio");
@@ -238,7 +248,7 @@ void modoCadastro(){
         Serial.println("resposta http: ->" + http.getString());
         digitalWrite(red, HIGH);
         delay(2000);
-      }else if(response == 409 && estadoBotao){
+      }else if(response == 409){
         String resp = http.getString();
         lcd.clear();
         lcd.setCursor(0, 0);
@@ -266,16 +276,70 @@ void modoCadastro(){
       http.end();
 }
 
+void modoRetirada(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Escaneie qrcode");
+  lcd.setCursor(0, 1);
+  lcd.print("de Retirada");
 
-void modoLeitura(){
-          digitalWrite(yellow, LOW);
-          if (!mensagem_mostrada) {
-            lcd.setCursor(0, 0);
-            lcd.print("Modo LEITURA");
-            lcd.setCursor(0, 1);
-            lcd.print("Aproxime cracha:");
-            mensagem_mostrada = true;
-          }
+  unsigned long tempoInicio = millis();
+  while (true) {
+
+    if (millis() - tempoInicio > 120000) {  // 2 minutos = 120000 ms
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Tempo expirado!");
+      delay(2000);
+      lcd.clear();
+      mensagem_mostrada = false;  // permite exibir nova mensagem depois
+      return;  // sai do modoRetirada e volta para o loop principal
+    }
+    HTTPClient http;
+    
+    http.begin(urlStatus);
+    int response = http.GET();
+
+    if (response == 200) {
+      String payload = http.getString();
+      Serial.println("Resposta da API:");
+      Serial.println(payload);
+
+    if (payload.indexOf("\"status\":true") != -1) {
+      Serial.println("Abriu a trava!");
+      abrirTrava();
+      break;
+    }
+  }
+
+    http.end();
+    delay(2000);  // espera 2 segundos antes de consultar novamente
+  }
+
+  mensagem_mostrada = false;
+}
+
+void validaUsuario(){
+      digitalWrite(yellow, LOW);
+      if (!mensagem_mostrada) {
+        switch(modoAtual){
+          case RETIRADA:
+          lcd.setCursor(0, 0);
+          lcd.print("Modo RETIRADA");
+          lcd.setCursor(0, 1);
+          lcd.print("Aproxime cracha:");
+          break;
+
+          case DEVOLUCAO:
+          lcd.setCursor(0, 0);
+          lcd.print("Modo DEVOLUCAO");
+          lcd.setCursor(0, 1);
+          lcd.print("Aproxime cracha:");
+          break;
+        }
+        
+        mensagem_mostrada = true;
+      }
       Serial.println("Aguardando UID");      
         String uid = "";
         if (!mfrc522.PICC_IsNewCardPresent()) return;
@@ -296,19 +360,7 @@ void modoLeitura(){
           Serial.println("UID lido");
           if (uid == emergencyUID) {
             // Tag de emergência detectada!
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("EMERGENCIA!");
-            digitalWrite(green, HIGH);
-            digitalWrite(rele, HIGH);
-            delay(2000);  // abre por 5 segundos (ajuste se quiser)
-            while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
-            digitalWrite(green, LOW);
-            digitalWrite(rele, LOW);
-            mensagem_mostrada = false;
-            Serial.println("Lido o cartao de emergencia");
-            delay(1000);
-            lcd.clear();
+            abrirEmergencia();
             return;  // sai do loop para não executar o resto do código
           }
 
@@ -323,34 +375,20 @@ void modoLeitura(){
           int response = http.POST(body);
 
           if(response == 201 && estadoBotao == false){
-            lcd.clear();
-            digitalWrite(green, HIGH);
-            digitalWrite(rele, HIGH);
-            lcd.setCursor(0, 0);
-            lcd.print("Aberto!");
-            lcd.setCursor(0, 1);
-            lcd.print("Cartao OK");
-            Serial.println("resposta http" + http.getString());
-            delay(1000);
-            while(digitalRead(limit_switch) == 1);
-            delay(1500);
-            Serial.println("leitura ok");
-          }else if(response == 403 && estadoBotao == false){
-            lcd.clear();
-            digitalWrite(green, LOW);
-            Serial.println("UID não encontrado!");
-            lcd.setCursor(0, 0);
-            lcd.print("Cartao nao");
-            lcd.setCursor(0, 1);
-            lcd.print("encontrado!");
-            for(int i = 0; i <= 2; i++){
-              digitalWrite(red, HIGH);
-              delay(500);
-              digitalWrite(red, LOW);
-              delay(500);
+            //Aqui solicitaremos a leitura do qrcode e preenchimento do formulario. Após isso abriremos a trava.
+            switch (modoAtual) {
+              case DEVOLUCAO:
+                //modoDevolucao();
+                break;
+              case RETIRADA:
+                modoRetirada();
+                break;
             }
-            Serial.println("leitura ok.");
-            delay(1500);
+
+
+            //abrirTrava();
+          }else if(response == 403 && estadoBotao == false){
+            recusaAbertura();
           }
           else{
             lcd.clear();
@@ -380,12 +418,63 @@ void modoLeitura(){
 
 void trocaEstado(){
 
-  if(digitalRead(botao) == 1){
-    lcd.clear();
-    estadoBotao = !estadoBotao;
+    static unsigned long ultimaTroca = 0;
+  if (digitalRead(botao) == HIGH && millis() - ultimaTroca > 500) {
+    modoAtual = static_cast<Modo>((modoAtual + 1) % 3);
     mensagem_mostrada = false;
-    while(digitalRead(botao) == 1);
-    delay(150);
+    lcd.clear();
+    ultimaTroca = millis();
+    while (digitalRead(botao) == HIGH);  // debounce
   }
 
+
+}
+
+void abrirTrava(){
+  lcd.clear();
+  digitalWrite(green, HIGH);
+  digitalWrite(rele, HIGH);
+  lcd.setCursor(0, 0);
+  lcd.print("Aberto!");
+  lcd.setCursor(0, 1);
+  lcd.print("Cartao OK");
+  //Serial.println("resposta http" + error);
+  delay(1000);
+  while(digitalRead(limit_switch) == 1);
+  delay(1500);
+  Serial.println("leitura ok");
+}
+
+void abrirEmergencia(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("EMERGENCIA!");
+  digitalWrite(green, HIGH);
+  digitalWrite(rele, HIGH);
+  delay(2000);  // abre por 5 segundos (ajuste se quiser)
+  while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
+  digitalWrite(green, LOW);
+  digitalWrite(rele, LOW);
+  mensagem_mostrada = false;
+  Serial.println("Lido o cartao de emergencia");
+  delay(1000);
+  lcd.clear();
+}
+
+void recusaAbertura(){
+  lcd.clear();
+  digitalWrite(green, LOW);
+  Serial.println("UID não encontrado!");
+  lcd.setCursor(0, 0);
+  lcd.print("Cartao nao");
+  lcd.setCursor(0, 1);
+  lcd.print("encontrado!");
+  for(int i = 0; i <= 2; i++){
+    digitalWrite(red, HIGH);
+    delay(500);
+    digitalWrite(red, LOW);
+    delay(500);
+  }
+  Serial.println("leitura ok.");
+  delay(1500);
 }
