@@ -10,10 +10,11 @@ String urlAbertura = "https://api-armario-inteligente.onrender.com/abertura/";
 String urlCadastro = "https://api-armario-inteligente.onrender.com/usuarios/";
 String urlMaster = "https://api-armario-inteligente.onrender.com/master/";
 String urlStatus = "https://api-armario-inteligente.onrender.com/status_abertura/status";
+String urlResetStatus = "https://api-armario-inteligente.onrender.com/status_abertura/status/reset";
 
 
-char* ssid = "Travazap_2G";
-char* password = "GED022829";
+char* ssid = "TDB-GUEST";
+char* password = "";
 
 String emergencyUID = "F7B2F63";
 
@@ -23,7 +24,6 @@ bool mensagem_mostrada = false;
 #define RST_PIN         22
 #define SS_PIN          21
 #define green           2
-#define limit_switch    5
 #define red             25
 #define botao           26
 #define yellow          14
@@ -44,7 +44,6 @@ void setup() {
   Serial.begin(115200);
   pinMode(green, OUTPUT);
   pinMode(red, OUTPUT);
-  pinMode(limit_switch, INPUT);
   pinMode(rele, OUTPUT);
   pinMode(botao, INPUT);
   pinMode(yellow, OUTPUT);
@@ -71,7 +70,8 @@ void setup() {
   lcd.clear();
 
   lcd.print("Aguarde...");
-  delay(5000);
+  resetStatus();
+  delay(1000);
   lcd.clear();
 }
 
@@ -125,7 +125,6 @@ void offline(){
         digitalWrite(green, HIGH);
         digitalWrite(rele, HIGH);
         delay(5000);  // abre por 5 segundos (ajuste se quiser)
-        while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
         digitalWrite(green, LOW);
         digitalWrite(rele, LOW);
         mensagem_mostrada = false;
@@ -276,7 +275,7 @@ void modoCadastro(){
       http.end();
 }
 
-void modoRetirada(){
+void modoRetirada() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Escaneie qrcode");
@@ -301,11 +300,65 @@ void modoRetirada(){
     int response = http.GET();
 
     if (response == 200) {
+      Serial.println("entrou 200");
+      String payload = http.getString();
+      Serial.println("Resposta da API:");
+      Serial.println(payload);
+      Serial.println("");
+
+    if (payload.indexOf("\"status\":true") != -1) {
+      resetStatus();
+      delay(100);
+      Serial.println("Abriu a trava!");
+      abrirTrava();
+      break;
+    }
+  }else{
+    String payload = http.getString();
+    Serial.println(payload);
+  }
+
+    http.end();
+    delay(2000);  // espera 2 segundos antes de consultar novamente
+  }
+
+  mensagem_mostrada = false;
+
+}
+
+
+void modoDevolucao(){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Escaneie qrcode");
+  lcd.setCursor(0, 1);
+  lcd.print("de Devolucao");
+
+  unsigned long tempoInicio = millis();
+  while (true) {
+
+    if (millis() - tempoInicio > 120000) {  // 2 minutos = 120000 ms
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Tempo expirado!");
+      delay(2000);
+      lcd.clear();
+      mensagem_mostrada = false;  // permite exibir nova mensagem depois
+      return;  // sai do modoRetirada e volta para o loop principal
+    }
+    HTTPClient http;
+    
+    http.begin(urlStatus);
+    int response = http.GET();
+
+    if (response == 200) {
       String payload = http.getString();
       Serial.println("Resposta da API:");
       Serial.println(payload);
 
     if (payload.indexOf("\"status\":true") != -1) {
+      resetStatus();
+      delay(100);
       Serial.println("Abriu a trava!");
       abrirTrava();
       break;
@@ -317,6 +370,7 @@ void modoRetirada(){
   }
 
   mensagem_mostrada = false;
+
 }
 
 void validaUsuario(){
@@ -340,7 +394,6 @@ void validaUsuario(){
         
         mensagem_mostrada = true;
       }
-      Serial.println("Aguardando UID");      
         String uid = "";
         if (!mfrc522.PICC_IsNewCardPresent()) return;
         if (!mfrc522.PICC_ReadCardSerial()) return;
@@ -368,26 +421,34 @@ void validaUsuario(){
           HTTPClient http;
           http.begin(urlAbertura);
           http.addHeader("Content-Type", "application/json"); // Tipo de dado que vai enviar
-          String body = "{\"UID\": \"" + uid + "\"}";
+          String body = "";
+
+          switch (modoAtual) {
+            case DEVOLUCAO:
+              body = "{\"UID\": \"" + uid + "\", \"acao\": \"devolucao\"}";
+              break;
+            case RETIRADA:
+              body = "{\"UID\": \"" + uid + "\", \"acao\": \"retirada\"}";
+              break;
+          }
+
 
           Serial.println(body);
 
           int response = http.POST(body);
 
-          if(response == 201 && estadoBotao == false){
+          if(response == 201){
             //Aqui solicitaremos a leitura do qrcode e preenchimento do formulario. Após isso abriremos a trava.
             switch (modoAtual) {
               case DEVOLUCAO:
-                //modoDevolucao();
+                modoDevolucao();
                 break;
               case RETIRADA:
                 modoRetirada();
                 break;
             }
-
-
             //abrirTrava();
-          }else if(response == 403 && estadoBotao == false){
+          }else if(response == 403){
             recusaAbertura();
           }
           else{
@@ -440,7 +501,6 @@ void abrirTrava(){
   lcd.print("Cartao OK");
   //Serial.println("resposta http" + error);
   delay(1000);
-  while(digitalRead(limit_switch) == 1);
   delay(1500);
   Serial.println("leitura ok");
 }
@@ -452,7 +512,6 @@ void abrirEmergencia(){
   digitalWrite(green, HIGH);
   digitalWrite(rele, HIGH);
   delay(2000);  // abre por 5 segundos (ajuste se quiser)
-  while(digitalRead(limit_switch) == 1);  // espera o armario fechar (se tiver limit switch)
   digitalWrite(green, LOW);
   digitalWrite(rele, LOW);
   mensagem_mostrada = false;
@@ -469,12 +528,27 @@ void recusaAbertura(){
   lcd.print("Cartao nao");
   lcd.setCursor(0, 1);
   lcd.print("encontrado!");
-  for(int i = 0; i <= 2; i++){
-    digitalWrite(red, HIGH);
-    delay(500);
-    digitalWrite(red, LOW);
-    delay(500);
-  }
+  digitalWrite(red, HIGH);
+  delay(2000);
   Serial.println("leitura ok.");
   delay(1500);
+}
+
+void resetStatus(){
+  HTTPClient httpLimpa;
+  httpLimpa.begin(urlResetStatus);
+  int respostaLimpeza = httpLimpa.sendRequest("DELETE");
+
+  Serial.println("entrou reset");
+
+  if (respostaLimpeza == 200) {
+    Serial.println("Tabela status_abertura limpa com sucesso.");
+      Serial.println("entrou 200");
+  } else {
+      Serial.println("entrou erro");
+    Serial.print("Erro ao limpar tabela: ");
+    Serial.println(respostaLimpeza);
+  }
+  delay(1000);
+  httpLimpa.end();
 }
